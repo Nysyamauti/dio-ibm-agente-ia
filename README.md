@@ -10,8 +10,8 @@
 This repository is organized into multiple hands-on labs following the step-by-step technical demonstrations from the DIO course.
 
 * [📂 Demo 1: Message Queue vs Data Streaming](demo-01/README.md) — Learning the behavior about traditional queues and real-time event streams.
-* [📂 Demo 2: The Kafka log (soon)](#) — Learning about Topics, Partitions and Offsets.
-
+* [📂 Demo 2: The Kafka log](demo-02/README.md) — Learning about Topics, Partitions and Offsets.
+* [📂 Demo 3: Producer and Consumers: The APIs Anatomy (soon)](#)
 ---
 
 ## 🛠️ Global Requirements
