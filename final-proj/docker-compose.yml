@@ -1,0 +1,137 @@
+networks:
+  desafio-rede:
+    driver: bridge
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: 'Mk3OEYBSD3kBcVwMTVwAfg'
+
+      # Adicione estas linhas para ativar a segurança e o autorizador de ACLs:
+      KAFKA_AUTHORIZER_CLASS_NAME: 'org.apache.kafka.metadata.authorizer.StandardAuthorizer'
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+    networks:
+      - desafio-rede
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'PLAINTEXT://kafka:29092'
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: 'PLAINTEXT'
+      SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8081'
+      # Adiciona tolerância para o Schema Registry tentar reconectar caso o Kafka esteja aquecendo
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_TIMEOUT_MS: '40000'
+      SCHEMA_REGISTRY_DEBUG: 'true'
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - desafio-rede
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: 'desafio-kraft'
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 'kafka:29092'
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: 'http://schema-registry:8081'
+    depends_on:
+      - kafka
+      - schema-registry
+    networks:
+      - desafio-rede
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: streaming_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    networks:
+      - desafio-rede
+
+  jobmanager:
+    image: flink:1.18.1-java17
+    container_name: jobmanager
+    hostname: jobmanager
+    ports:
+      - "8082:8081" # Nota: Se a porta 8081 conflitar com o Schema Registry, mude para 8082:8081
+    command: jobmanager
+    volumes:
+      # Mapeamento do plugin de forma isolada e segura
+      - ./jars/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar
+      - ./jars/flink-connector-jdbc-3.1.2-1.18.jar:/opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar
+      - ./jars/postgresql-42.6.0.jar:/opt/flink/lib/postgresql-42.6.0.jar
+      - ./jars/flink-sql-avro-confluent-registry-1.18.1.jar:/opt/flink/lib/flink-sql-avro-confluent-registry-1.18.1.jar
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        rest.flamegraph.enabled: true
+        taskmanager.memory.process.size: 2048m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - desafio-rede
+
+  taskmanager:
+    image: flink:1.18.1-java17
+    container_name: taskmanager
+    hostname: taskmanager
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    command: taskmanager
+    volumes:
+      # Mapeamento do plugin de forma isolada e segura
+      - ./jars/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/flink-sql-connector-kafka-3.1.0-1.18.jar
+      - ./jars/flink-connector-jdbc-3.1.2-1.18.jar:/opt/flink/lib/flink-connector-jdbc-3.1.2-1.18.jar
+      - ./jars/postgresql-42.6.0.jar:/opt/flink/lib/postgresql-42.6.0.jar
+      - ./jars/flink-sql-avro-confluent-registry-1.18.1.jar:/opt/flink/lib/flink-sql-avro-confluent-registry-1.18.1.jar
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        # Aumenta o timeout de registro para evitar que ele morra antes de conectar
+        pekko.client.timeout: 30s
+        web.timeout: 60000
+        taskmanager.memory.process.size: 1536m
+    networks:
+      - desafio-rede
