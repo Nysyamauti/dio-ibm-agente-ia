@@ -22,7 +22,7 @@ docker compose down
 
 ## 💻 Expected Output
 
-After running `docker compose up -d`, all services should be up and healthy (`docker ps`).
+After running `docker compose up -d`, all services should be up and healthy (`docker compose ps`).
 
 ```text
 NAMES             IMAGE                                   STATUS                   PORTS
